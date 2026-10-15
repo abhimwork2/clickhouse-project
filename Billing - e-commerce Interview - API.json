@@ -1,0 +1,331 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Home assignment API",
+    "description": "API to provide access to customer and product data",
+    "version": "1.0"
+  },
+  "tags": [
+    {
+      "name": "Customers",
+      "description": "Endpoints for reading customer data"
+    },
+    {
+      "name": "Products",
+      "description": "Endpoints for reading product data"
+    },
+    {
+      "name": "Shipments",
+      "description": "Endpoints for managing shipments"
+    }
+  ],
+  "paths": {
+    "/customers/{customerId}": {
+      "get": {
+        "tags": ["Customers"],
+        "summary": "Get customer",
+        "description": "Get the customer record as it exists right now.",
+        "operationId": "GetCustomer",
+        "parameters": [
+          {
+            "name": "customerId",
+            "in": "path",
+            "description": "UUID of the customer",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns the customer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "UUID of the customer."
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "Name of the customer."
+                    },
+                    "billingAddress": {
+                      "type": "object",
+                      "properties": {
+                        "line1": {
+                          "type": "string"
+                        },
+                        "line2": {
+                          "type": "string"
+                        },
+                        "city": {
+                          "type": "string"
+                        },
+                        "postalCode": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string"
+                        },
+                        "country": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "shippingAddress": {
+                      "type": "object",
+                      "properties": {
+                        "line1": {
+                          "type": "string"
+                        },
+                        "line2": {
+                          "type": "string"
+                        },
+                        "city": {
+                          "type": "string"
+                        },
+                        "postalCode": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string"
+                        },
+                        "country": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "email": {
+                      "type": "string",
+                      "description": "Customer's email address."
+                    },
+                    "createdAt": {
+                      "type": "number",
+                      "description": "The timestamp when the customer was created, unix epoch millis."
+                    },
+                    "lastModifiedAt": {
+                      "type": "number",
+                      "description": "The timestamp when the customer was last modified, unix epoch millis."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "Message": {}
+                  }
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "Message": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/products/{productId}": {
+      "get": {
+        "tags": ["Products"],
+        "summary": "Get product",
+        "description": "Get the product record as it exists right now.",
+        "operationId": "GetProduct",
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "description": "UUID of the product",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns the Product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "UUID of the Product."
+                    },
+                    "sku": {
+                      "type": "string",
+                      "description": "SKU of the Product."
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "Name of the Product."
+                    },
+                    "description": {
+                      "type": "string",
+                      "description": "Product detailed description."
+                    },
+                    "price": {
+                      "type": "number",
+                      "description": "The product price in USD."
+                    },
+                    "createdAt": {
+                      "type": "number",
+                      "description": "The timestamp when the product was created, unix epoch millis."
+                    },
+                    "lastModifiedAt": {
+                      "type": "number",
+                      "description": "The timestamp when the product was last modified, unix epoch millis."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "Message": {}
+                  }
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "Message": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shipments": {
+      "post": {
+        "tags": ["Shipments"],
+        "summary": "Create a new shipment",
+        "description": "Create a new shipment (send purchased products to customer).",
+        "operationId": "CreateShipment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "shippingAddress": {
+                    "type": "object",
+                    "properties": {
+                      "line1": {
+                        "type": "string"
+                      },
+                      "line2": {
+                        "type": "string"
+                      },
+                      "city": {
+                        "type": "string"
+                      },
+                      "postalCode": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string"
+                      },
+                      "country": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "products": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sku": {
+                          "type": "string"
+                        },
+                        "quantity": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Shipment created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "UUID of the Shipment that was created."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "Message": {}
+                  }
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "Message": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
