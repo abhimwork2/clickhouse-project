@@ -1,7 +1,10 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { createPurchase } from '../services/purchase-service';
+import {
+    createPurchase,
+    getPurchaseHistory,
+} from '../services/purchase-service';
 
 const createPurchaseSchema = z.object({
     customerId: z.string().uuid(),
@@ -14,6 +17,15 @@ const createPurchaseSchema = z.object({
 });
 
 const purchaseRoutes: FastifyPluginAsync = async (app) => {
+    // Get customer purchase history
+    app.get<{ Params: { customerId: string } }>(
+        '/customers/:customerId/purchases',
+        async (request) => {
+            const { customerId } = request.params;
+
+            return getPurchaseHistory(customerId);
+        },
+    );
     app.post('/purchases', async (request, reply) => {
         const validation = createPurchaseSchema.safeParse(request.body);
 

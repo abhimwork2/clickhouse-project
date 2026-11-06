@@ -366,3 +366,87 @@ export const createPurchase = async (
         shipmentId: shipment.id,
     };
 };
+
+export interface PurchaseHistoryItem {
+    productId: string;
+    sku: string;
+    productName: string;
+    unitPriceCents: number;
+    quantity: number;
+    lineTotalCents: number;
+}
+
+export interface PurchaseHistoryRecord {
+    purchaseId: string;
+    totalCents: number;
+    status: string;
+    shipmentId: string | null;
+    createdAt: Date;
+    items: PurchaseHistoryItem[];
+}
+
+export const getPurchaseHistory = async (
+    customerId: string,
+): Promise<PurchaseHistoryRecord[]> => {
+    const result = await pool.query<{
+        purchase_id: string;
+        total_cents: string;
+        status: string;
+        shipment_id: string | null;
+        created_at: Date;
+        product_id: string;
+        sku: string;
+        product_name: string;
+        unit_price_cents: string;
+        quantity: number;
+        line_total_cents: string;
+    }>(
+        `SELECT
+            p.id AS purchase_id,
+            p.total_cents,
+            p.status,
+            p.shipment_id,
+            p.created_at,
+            pi.product_id,
+            pi.sku,
+            pi.product_name,
+            pi.unit_price_cents,
+            pi.quantity,
+            pi.line_total_cents
+         FROM purchases p
+         JOIN purchase_items pi ON pi.purchase_id = p.id
+         WHERE p.customer_id = $1
+         ORDER BY p.created_at DESC`,
+        [customerId],
+    );
+
+    const purchases = new Map<string, PurchaseHistoryRecord>();
+
+    for (const row of result.rows) {
+        let purchase = purchases.get(row.purchase_id);
+
+        if (!purchase) {
+            purchase = {
+                purchaseId: row.purchase_id,
+                totalCents: Number(row.total_cents),
+                status: row.status,
+                shipmentId: row.shipment_id,
+                createdAt: row.created_at,
+                items: [],
+            };
+
+            purchases.set(row.purchase_id, purchase);
+        }
+
+        purchase.items.push({
+            productId: row.product_id,
+            sku: row.sku,
+            productName: row.product_name,
+            unitPriceCents: Number(row.unit_price_cents),
+            quantity: row.quantity,
+            lineTotalCents: Number(row.line_total_cents),
+        });
+    }
+
+    return Array.from(purchases.values());
+};
