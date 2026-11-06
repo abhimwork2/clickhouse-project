@@ -25,6 +25,20 @@ export interface PurchaseResult {
     shipmentId: string | null;
 }
 
+export interface CreateRefundInput {
+    purchaseId: string;
+    amountCents: number;
+    reason: string;
+}
+
+export interface RefundResult {
+    refundId: string;
+    purchaseId: string;
+    amountCents: number;
+    totalRefundedCents: number;
+    purchaseStatus: 'partially_refunded' | 'refunded';
+}
+
 interface PurchaseItemSnapshot {
     productId: string;
     sku: string;
@@ -449,4 +463,134 @@ export const getPurchaseHistory = async (
     }
 
     return Array.from(purchases.values());
+};
+
+export const createRefund = async (
+    input: CreateRefundInput,
+): Promise<RefundResult> => {
+    if (!Number.isSafeInteger(input.amountCents) || input.amountCents <= 0) {
+        throw new Error('Refund amount must be a positive integer');
+    }
+
+    if (!input.reason.trim()) {
+        throw new Error('Refund reason is required');
+    }
+
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        // Lock the purchase to prevent concurrent refunds.
+        const purchaseResult = await client.query<{
+            id: string;
+            customer_id: string;
+            total_cents: string;
+            status: string;
+        }>(
+            `SELECT id, customer_id, total_cents, status
+             FROM purchases
+             WHERE id = $1
+             FOR UPDATE`,
+            [input.purchaseId],
+        );
+
+        const purchase = purchaseResult.rows[0];
+
+        if (!purchase) {
+            throw new Error('Purchase not found');
+        }
+
+        if (
+            purchase.status !== 'completed' &&
+            purchase.status !== 'partially_refunded'
+        ) {
+            throw new Error('Purchase is not eligible for a refund');
+        }
+
+        const refundTotalResult = await client.query<{
+            total_refunded: string;
+        }>(
+            `SELECT COALESCE(SUM(amount_cents), 0) AS total_refunded
+             FROM refunds
+             WHERE purchase_id = $1`,
+            [input.purchaseId],
+        );
+
+        const totalRefunded = Number(
+            refundTotalResult.rows[0]?.total_refunded ?? 0,
+        );
+
+        const purchaseTotal = Number(purchase.total_cents);
+        const remainingRefundable = purchaseTotal - totalRefunded;
+
+        if (input.amountCents > remainingRefundable) {
+            throw new Error(
+                `Refund exceeds remaining refundable amount: ${remainingRefundable} cents`,
+            );
+        }
+
+        const refundResult = await client.query<{ id: string }>(
+            `INSERT INTO refunds (purchase_id, amount_cents, reason)
+             VALUES ($1, $2, $3)
+             RETURNING id`,
+            [input.purchaseId, input.amountCents, input.reason.trim()],
+        );
+
+        const refundId = refundResult.rows[0]?.id;
+
+        if (!refundId) {
+            throw new Error('Failed to create refund');
+        }
+
+        await client.query(
+            `UPDATE credit_accounts
+             SET balance_cents = balance_cents + $1,
+                 updated_at = NOW()
+             WHERE customer_id = $2`,
+            [input.amountCents, purchase.customer_id],
+        );
+
+        await client.query(
+            `INSERT INTO credit_ledger
+             (customer_id, amount_cents, entry_type, reason, reference_id)
+             VALUES ($1, $2, 'refund_credit', $3, $4)`,
+            [
+                purchase.customer_id,
+                input.amountCents,
+                input.reason.trim(),
+                refundId,
+            ],
+        );
+
+        const totalRefundedCents = totalRefunded + input.amountCents;
+
+        const purchaseStatus =
+            totalRefundedCents === purchaseTotal
+                ? 'refunded'
+                : 'partially_refunded';
+
+        await client.query(
+            `UPDATE purchases
+             SET status = $1,
+                 updated_at = NOW()
+             WHERE id = $2`,
+            [purchaseStatus, input.purchaseId],
+        );
+
+        await client.query('COMMIT');
+
+        return {
+            refundId,
+            purchaseId: input.purchaseId,
+            amountCents: input.amountCents,
+            totalRefundedCents,
+            purchaseStatus,
+        };
+    } catch (error: unknown) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
 };
