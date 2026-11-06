@@ -1,8 +1,8 @@
 # E-Commerce Billing API
 
-A small e-commerce billing service built with TypeScript, Fastify, and PostgreSQL.
+An e-commerce billing service built with TypeScript, Fastify, and PostgreSQL.
 
-The service manages customer credit, product purchases, shipment creation, purchase history, and refunds. Customer and product data are retrieved through external APIs, which are mocked for this assignment.
+The service manages customer credit, product purchases, shipment creation, purchase history, and refunds. Customer and product data are retrieved through external APIs, which are mocked for now.
 
 ## Tech Stack
 
@@ -108,9 +108,7 @@ A purchase request looks like:
 
 ## Design Decisions
 
-A few decisions were important for this implementation:
-
-- **Money:** Monetary values are stored as integer cents to avoid floating-point precision issues.
+- **Money:** Values are stored as integer cents to avoid floating-point precision issues.
 - **Product snapshots:** Product name, SKU, and price are saved with each purchase. This preserves the original purchase details even if the external product record changes later.
 - **Credit ledger:** Every credit movement is recorded with its amount, reason, reference, and timestamp. The current balance is maintained separately for efficient lookups.
 - **Credit holds:** Credit is reserved when a purchase is created. Available credit is calculated as `balance_cents - held_cents`. This prevents the same credit from being used by multiple pending purchases.
