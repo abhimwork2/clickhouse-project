@@ -17,3 +17,7 @@
 7. Core tables:
    credit_accounts, credit_ledger, purchases,
    purchase_items, refunds.
+
+8. Reserve credit when an order is placed. Capture the reserved
+   amount after successful shipment, or release it if shipment
+   fails. Track in the credit ledger for full auditability.
