@@ -1,0 +1,19 @@
+1. PostgreSQL for relational data; SQL migrations for schema changes.
+
+2. Customer and product data come from external APIs. Store product
+   snapshots at purchase time for historical accuracy.
+
+3. Store money as integer cents to avoid floating-point errors.
+
+4. Maintain current balances and an append-only credit ledger
+   recording every credit movement with reason and timestamp.
+
+5. Support full and partial refunds without exceeding the
+   original purchase amount.
+
+6. Handle shipment failures through purchase statuses and
+   compensating credit entries.
+
+7. Core tables:
+   credit_accounts, credit_ledger, purchases,
+   purchase_items, refunds.
