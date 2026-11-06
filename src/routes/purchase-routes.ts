@@ -17,6 +17,8 @@ const createPurchaseSchema = z.object({
     ).min(1),
 });
 
+const purchaseIdSchema = z.string().uuid();
+
 const purchaseRoutes: FastifyPluginAsync = async (app) => {
 
     // Get customer purchase history
@@ -33,7 +35,17 @@ const purchaseRoutes: FastifyPluginAsync = async (app) => {
     app.post<{ Params: { purchaseId: string } }>(
         '/purchases/:purchaseId/refunds',
         async (request, reply) => {
-            const { purchaseId } = request.params;
+            const paramValidation = purchaseIdSchema.safeParse(
+                request.params.purchaseId,
+            );
+
+            if (!paramValidation.success) {
+                return reply.status(400).send({
+                    error: 'Invalid purchase ID',
+                });
+            }
+
+            const purchaseId = paramValidation.data;
 
             const refundSchema = z.object({
                 amountCents: z.number().int().positive().safe(),
@@ -66,7 +78,6 @@ const purchaseRoutes: FastifyPluginAsync = async (app) => {
                         error: error.message,
                     });
                 }
-
                 throw error;
             }
         },
