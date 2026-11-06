@@ -2,10 +2,6 @@ import { pool } from '../db';
 import { getCustomer } from '../mocks/customer-api';
 import { getProduct } from '../mocks/product-api';
 import { createShipment } from '../mocks/shipment-api';
-import {
-    placeCreditHold,
-    captureCreditHold,
-} from './credit-service';
 import type {
     ShipmentRequest,
     ShipmentResponse,

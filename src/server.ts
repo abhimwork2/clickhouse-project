@@ -1,8 +1,13 @@
 import Fastify from 'fastify';
 import { config } from './config';
 import { pool } from './db';
+import creditRoutes from './routes/credit-routes';
+import purchaseRoutes from './routes/purchase-routes';
 
 const app = Fastify({ logger: true });
+
+app.register(creditRoutes);
+app.register(purchaseRoutes);
 
 app.get('/health', async (_request, reply) => {
   try {
