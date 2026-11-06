@@ -1,8 +1,8 @@
 export interface Customer {
   id: string;
   name: string;
-  billingAddress: string;
-  shippingAddress: string;
+  billingAddress: Address;
+  shippingAddress: Address;
   email: string;
   createdAt: number;
   lastModifiedAt: number;
@@ -28,4 +28,13 @@ export interface ShipmentRequest {
 
 export interface ShipmentResponse {
   id: string;
+}
+
+export interface Address {
+  line1: string;
+  line2?: string;
+  city: string;
+  postalCode: string;
+  state: string;
+  country: string;
 }

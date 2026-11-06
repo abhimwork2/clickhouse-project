@@ -4,8 +4,20 @@ const customers: Customer[] = [
   {
     id: '11111111-1111-4111-8111-111111111111',
     name: 'John Doe',
-    billingAddress: '10 Main Street, New York, NY',
-    shippingAddress: '10 Main Street, New York, NY',
+billingAddress: {
+  line1: '10 Main Street',
+  city: 'New York',
+  postalCode: '10001',
+  state: 'NY',
+  country: 'USA',
+},
+shippingAddress: {
+  line1: '10 Main Street',
+  city: 'New York',
+  postalCode: '10001',
+  state: 'NY',
+  country: 'USA',
+},
     email: 'john@example.com',
     createdAt: Date.now(),
     lastModifiedAt: Date.now(),
