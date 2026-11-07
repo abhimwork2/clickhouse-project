@@ -1,52 +1,36 @@
+import type { PoolClient } from 'pg';
 import { pool } from '../db';
 import { getCustomer } from '../mocks/customer-api';
 import { getProduct } from '../mocks/product-api';
 import { createShipment } from '../mocks/shipment-api';
+import type {
+    CreatePurchaseRequest,
+    CreateRefundRequest,
+    PurchaseHistoryEntryResponse,
+    PurchaseHistoryItemResponse,
+    PurchaseResponse,
+    RefundResponse,
+} from '../types/api';
 import type {
     ShipmentRequest,
     ShipmentResponse,
 } from '../types/external-apis';
 
 
-export interface PurchaseItemInput {
-    productId: string;
-    quantity: number;
+export type PurchaseItemInput = CreatePurchaseRequest['items'][number];
+export type CreatePurchaseInput = CreatePurchaseRequest;
+export type PurchaseResult = PurchaseResponse;
+export type CreateRefundInput = CreateRefundRequest & { purchaseId: string };
+export type RefundResult = RefundResponse;
+
+export class ShipmentCreationError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'ShipmentCreationError';
+    }
 }
 
-export interface CreatePurchaseInput {
-    customerId: string;
-    items: PurchaseItemInput[];
-}
-
-export interface PurchaseResult {
-    purchaseId: string;
-    totalCents: number;
-    status: 'pending_shipment' | 'completed' | 'shipment_failed';
-    shipmentId: string | null;
-}
-
-export interface CreateRefundInput {
-    purchaseId: string;
-    amountCents: number;
-    reason: string;
-}
-
-export interface RefundResult {
-    refundId: string;
-    purchaseId: string;
-    amountCents: number;
-    totalRefundedCents: number;
-    purchaseStatus: 'partially_refunded' | 'refunded';
-}
-
-interface PurchaseItemSnapshot {
-    productId: string;
-    sku: string;
-    productName: string;
-    unitPriceCents: number;
-    quantity: number;
-    lineTotalCents: number;
-}
+type PurchaseItemSnapshot = PurchaseHistoryItemResponse;
 
 const dollarsToCents = (price: number): number => {
     if (!Number.isFinite(price) || price <= 0) {
@@ -143,6 +127,7 @@ const buildShipmentRequest = (
 });
 
 const savePurchase = async (
+    client: PoolClient,
     customerId: string,
     totalCents: number,
     shippingAddress: NonNullable<
@@ -150,12 +135,7 @@ const savePurchase = async (
     >['shippingAddress'],
     items: PurchaseItemSnapshot[],
 ): Promise<string> => {
-    const client = await pool.connect();
-
-    try {
-        await client.query('BEGIN');
-
-        const purchaseResult = await client.query<{ id: string }>(
+    const purchaseResult = await client.query<{ id: string }>(
             `INSERT INTO purchases
        (customer_id, total_cents, status, shipping_address)
        VALUES ($1, $2, 'pending_shipment', $3)
@@ -207,18 +187,11 @@ const savePurchase = async (
             [customerId, totalCents, 'Purchase credit hold', purchaseId],
         );
 
-        await client.query('COMMIT');
-
-        return purchaseId;
-    } catch (error: unknown) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
-    }
+    return purchaseId;
 };
 
 const completePurchase = async (
+    client: PoolClient,
     purchaseId: string,
     customerId: string,
     amountCents: number,
@@ -227,57 +200,45 @@ const completePurchase = async (
     if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
         throw new Error('Amount must be a positive integer');
     }
-    const client = await pool.connect();
-
-    try {
-        await client.query('BEGIN');
-
-        const result = await client.query(
-            `UPDATE credit_accounts
+    const result = await client.query(
+        `UPDATE credit_accounts
        SET balance_cents = balance_cents - $1,
            held_cents = held_cents - $1,
            updated_at = NOW()
        WHERE customer_id = $2
          AND held_cents >= $1`,
-            [amountCents, customerId],
-        );
+        [amountCents, customerId],
+    );
 
-        if (result.rowCount === 0) {
-            throw new Error('Unable to capture credit hold');
-        }
+    if (result.rowCount === 0) {
+        throw new Error('Unable to capture credit hold');
+    }
 
-        await client.query(
-            `INSERT INTO credit_ledger
+    await client.query(
+        `INSERT INTO credit_ledger
        (customer_id, amount_cents, entry_type, reason, reference_id)
        VALUES ($1, $2, 'capture', $3, $4)`,
-            [customerId, -amountCents, 'Purchase completed', purchaseId],
-        );
+        [customerId, -amountCents, 'Purchase completed', purchaseId],
+    );
 
-        const purchaseUpdate = await client.query(
-            `UPDATE purchases
+    const purchaseUpdate = await client.query(
+        `UPDATE purchases
             SET status = 'completed',
                 shipment_id = $1,
                 updated_at = NOW()
             WHERE id = $2
             AND customer_id = $3
             AND status = 'pending_shipment'`,
-            [shipmentId, purchaseId, customerId],
-        );
+        [shipmentId, purchaseId, customerId],
+    );
 
-        if (purchaseUpdate.rowCount !== 1) {
-            throw new Error('Purchase is not pending or cannot be completed');
-        }
-
-        await client.query('COMMIT');
-    } catch (error: unknown) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
+    if (purchaseUpdate.rowCount !== 1) {
+        throw new Error('Purchase is not pending or cannot be completed');
     }
 };
 
 const failPurchase = async (
+    client: PoolClient,
     purchaseId: string,
     customerId: string,
     amountCents: number,
@@ -285,57 +246,60 @@ const failPurchase = async (
     if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
         throw new Error('Amount must be a positive integer');
     }
-    const client = await pool.connect();
-
-    try {
-        await client.query('BEGIN');
-
-        const result = await client.query(
-            `UPDATE credit_accounts
+    const result = await client.query(
+        `UPDATE credit_accounts
        SET held_cents = held_cents - $1,
            updated_at = NOW()
        WHERE customer_id = $2
          AND held_cents >= $1`,
-            [amountCents, customerId],
-        );
+        [amountCents, customerId],
+    );
 
-        if (result.rowCount === 0) {
-            throw new Error('Unable to release credit hold');
-        }
+    if (result.rowCount === 0) {
+        throw new Error('Unable to release credit hold');
+    }
 
-        await client.query(
-            `INSERT INTO credit_ledger
+    await client.query(
+        `INSERT INTO credit_ledger
        (customer_id, amount_cents, entry_type, reason, reference_id)
        VALUES ($1, $2, 'release', $3, $4)`,
-            [customerId, -amountCents, 'Shipment creation failed', purchaseId],
-        );
+        [customerId, -amountCents, 'Shipment creation failed', purchaseId],
+    );
 
-        const purchaseUpdate = await client.query(
-            `UPDATE purchases
+    const purchaseUpdate = await client.query(
+        `UPDATE purchases
      SET status = 'shipment_failed',
          updated_at = NOW()
      WHERE id = $1
        AND customer_id = $2
        AND status = 'pending_shipment'`,
-            [purchaseId, customerId],
-        );
+        [purchaseId, customerId],
+    );
 
-        if (purchaseUpdate.rowCount !== 1) {
-            throw new Error('Purchase is not pending or cannot be marked as failed');
-        }
-
-        await client.query('COMMIT');
-    } catch (error: unknown) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
+    if (purchaseUpdate.rowCount !== 1) {
+        throw new Error('Purchase is not pending or cannot be marked as failed');
     }
 };
 
 export const createPurchase = async (
     input: CreatePurchaseInput,
+    transactionClient?: PoolClient,
+    idempotencyKey?: string,
 ): Promise<PurchaseResult> => {
+    if (!transactionClient) {
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            const purchase = await createPurchase(input, client, idempotencyKey);
+            await client.query('COMMIT');
+            return purchase;
+        } catch (error: unknown) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
 
     if (!input.customerId.trim()) {
         throw new Error('Customer ID is required');
@@ -353,6 +317,7 @@ export const createPurchase = async (
     const totalCents = calculatePurchaseTotal(items);
 
     const purchaseId = await savePurchase(
+        transactionClient,
         customer.id,
         totalCents,
         customer.shippingAddress,
@@ -367,18 +332,25 @@ export const createPurchase = async (
     let shipment: ShipmentResponse;
 
     try {
-        shipment = await createShipment(shipmentRequest);
+        shipment = await createShipment(
+            shipmentRequest,
+            idempotencyKey ? `purchase.create:${idempotencyKey}` : undefined,
+        );
     } catch (error: unknown) {
         await failPurchase(
+            transactionClient,
             purchaseId,
             customer.id,
             totalCents,
         );
 
-        throw error;
+        throw new ShipmentCreationError(
+            error instanceof Error ? error.message : 'Shipment creation failed',
+        );
     }
 
     await completePurchase(
+        transactionClient,
         purchaseId,
         customer.id,
         totalCents,
@@ -393,23 +365,8 @@ export const createPurchase = async (
     };
 };
 
-export interface PurchaseHistoryItem {
-    productId: string;
-    sku: string;
-    productName: string;
-    unitPriceCents: number;
-    quantity: number;
-    lineTotalCents: number;
-}
-
-export interface PurchaseHistoryRecord {
-    purchaseId: string;
-    totalCents: number;
-    status: string;
-    shipmentId: string | null;
-    createdAt: Date;
-    items: PurchaseHistoryItem[];
-}
+export type PurchaseHistoryItem = PurchaseHistoryItemResponse;
+export type PurchaseHistoryRecord = PurchaseHistoryEntryResponse;
 
 export const getPurchaseHistory = async (
     customerId: string,
@@ -457,7 +414,7 @@ export const getPurchaseHistory = async (
                 totalCents: Number(row.total_cents),
                 status: row.status,
                 shipmentId: row.shipment_id,
-                createdAt: row.created_at,
+                createdAt: row.created_at.toISOString(),
                 items: [],
             };
 
@@ -479,6 +436,7 @@ export const getPurchaseHistory = async (
 
 export const createRefund = async (
     input: CreateRefundInput,
+    transactionClient?: PoolClient,
 ): Promise<RefundResult> => {
     if (!Number.isSafeInteger(input.amountCents) || input.amountCents <= 0) {
         throw new Error('Refund amount must be a positive integer');
@@ -488,121 +446,128 @@ export const createRefund = async (
         throw new Error('Refund reason is required');
     }
 
-    const client = await pool.connect();
+    if (transactionClient) {
+        return createRefundInTransaction(input, transactionClient);
+    }
 
+    const client = await pool.connect();
     try {
         await client.query('BEGIN');
-
-        // Lock the purchase to prevent concurrent refunds.
-        const purchaseResult = await client.query<{
-            id: string;
-            customer_id: string;
-            total_cents: string;
-            status: string;
-        }>(
-            `SELECT id, customer_id, total_cents, status
-             FROM purchases
-             WHERE id = $1
-             FOR UPDATE`,
-            [input.purchaseId],
-        );
-
-        const purchase = purchaseResult.rows[0];
-
-        if (!purchase) {
-            throw new Error('Purchase not found');
-        }
-
-        if (
-            purchase.status !== 'completed' &&
-            purchase.status !== 'partially_refunded'
-        ) {
-            throw new Error('Purchase is not eligible for a refund');
-        }
-
-        const refundTotalResult = await client.query<{
-            total_refunded: string;
-        }>(
-            `SELECT COALESCE(SUM(amount_cents), 0) AS total_refunded
-             FROM refunds
-             WHERE purchase_id = $1`,
-            [input.purchaseId],
-        );
-
-        const totalRefunded = Number(
-            refundTotalResult.rows[0]?.total_refunded ?? 0,
-        );
-
-        const purchaseTotal = Number(purchase.total_cents);
-        const remainingRefundable = purchaseTotal - totalRefunded;
-
-        if (input.amountCents > remainingRefundable) {
-            throw new Error(
-                `Refund exceeds remaining refundable amount: ${remainingRefundable} cents`,
-            );
-        }
-
-        const refundResult = await client.query<{ id: string }>(
-            `INSERT INTO refunds (purchase_id, amount_cents, reason)
-             VALUES ($1, $2, $3)
-             RETURNING id`,
-            [input.purchaseId, input.amountCents, input.reason.trim()],
-        );
-
-        const refundId = refundResult.rows[0]?.id;
-
-        if (!refundId) {
-            throw new Error('Failed to create refund');
-        }
-
-        await client.query(
-            `UPDATE credit_accounts
-             SET balance_cents = balance_cents + $1,
-                 updated_at = NOW()
-             WHERE customer_id = $2`,
-            [input.amountCents, purchase.customer_id],
-        );
-
-        await client.query(
-            `INSERT INTO credit_ledger
-             (customer_id, amount_cents, entry_type, reason, reference_id)
-             VALUES ($1, $2, 'refund_credit', $3, $4)`,
-            [
-                purchase.customer_id,
-                input.amountCents,
-                input.reason.trim(),
-                refundId,
-            ],
-        );
-
-        const totalRefundedCents = totalRefunded + input.amountCents;
-
-        const purchaseStatus =
-            totalRefundedCents === purchaseTotal
-                ? 'refunded'
-                : 'partially_refunded';
-
-        await client.query(
-            `UPDATE purchases
-             SET status = $1,
-                 updated_at = NOW()
-             WHERE id = $2`,
-            [purchaseStatus, input.purchaseId],
-        );
-
+        const refund = await createRefundInTransaction(input, client);
         await client.query('COMMIT');
-
-        return {
-            refundId,
-            purchaseId: input.purchaseId,
-            amountCents: input.amountCents,
-            totalRefundedCents,
-            purchaseStatus,
-        };
+        return refund;
     } catch (error: unknown) {
         await client.query('ROLLBACK');
         throw error;
     } finally {
         client.release();
     }
+};
+
+const createRefundInTransaction = async (
+    input: CreateRefundInput,
+    client: PoolClient,
+): Promise<RefundResult> => {
+    // Lock the purchase to prevent concurrent refunds.
+    const purchaseResult = await client.query<{
+        id: string;
+        customer_id: string;
+        total_cents: string;
+        status: string;
+    }>(
+        `SELECT id, customer_id, total_cents, status
+         FROM purchases
+         WHERE id = $1
+         FOR UPDATE`,
+        [input.purchaseId],
+    );
+
+    const purchase = purchaseResult.rows[0];
+
+    if (!purchase) {
+        throw new Error('Purchase not found');
+    }
+
+    if (
+        purchase.status !== 'completed' &&
+        purchase.status !== 'partially_refunded'
+    ) {
+        throw new Error('Purchase is not eligible for a refund');
+    }
+
+    const refundTotalResult = await client.query<{ total_refunded: string }>(
+        `SELECT COALESCE(SUM(amount_cents), 0) AS total_refunded
+         FROM refunds
+         WHERE purchase_id = $1`,
+        [input.purchaseId],
+    );
+
+    const totalRefunded = Number(
+        refundTotalResult.rows[0]?.total_refunded ?? 0,
+    );
+
+    const purchaseTotal = Number(purchase.total_cents);
+    const remainingRefundable = purchaseTotal - totalRefunded;
+
+    if (input.amountCents > remainingRefundable) {
+        throw new Error(
+            `Refund exceeds remaining refundable amount: ${remainingRefundable} cents`,
+        );
+    }
+
+    const refundResult = await client.query<{ id: string }>(
+        `INSERT INTO refunds (purchase_id, amount_cents, reason)
+         VALUES ($1, $2, $3)
+         RETURNING id`,
+        [input.purchaseId, input.amountCents, input.reason.trim()],
+    );
+
+    const refundId = refundResult.rows[0]?.id;
+
+    if (!refundId) {
+        throw new Error('Failed to create refund');
+    }
+
+    await client.query(
+        `UPDATE credit_accounts
+         SET balance_cents = balance_cents + $1,
+             updated_at = NOW()
+         WHERE customer_id = $2`,
+        [input.amountCents, purchase.customer_id],
+    );
+
+    await client.query(
+        `INSERT INTO credit_ledger
+         (customer_id, amount_cents, entry_type, reason, reference_id)
+         VALUES ($1, $2, 'refund_credit', $3, $4)`,
+        [
+            purchase.customer_id,
+            input.amountCents,
+            input.reason.trim(),
+            refundId,
+        ],
+    );
+
+    const totalRefundedCents = totalRefunded + input.amountCents;
+
+    const purchaseStatus =
+        totalRefundedCents === purchaseTotal
+            ? 'refunded'
+            : 'partially_refunded';
+
+    await client.query(
+        `UPDATE purchases
+         SET status = $1,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [purchaseStatus, input.purchaseId],
+    );
+
+    return {
+        refundId,
+        purchaseId: input.purchaseId,
+        amountCents: input.amountCents,
+        totalRefundedCents,
+        purchaseStatus,
+    };
 };

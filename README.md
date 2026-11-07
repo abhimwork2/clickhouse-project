@@ -28,6 +28,8 @@ docker compose up -d
 Get-Content migrations/001_initial_schema.sql -Raw | docker exec -i billing-postgres psql -U billing_app -d billing
 
 Get-Content migrations/002_credit_holds.sql -Raw | docker exec -i billing-postgres psql -U billing_app -d billing
+
+Get-Content migrations/003_idempotency_keys.sql -Raw | docker exec -i billing-postgres psql -U billing_app -d billing
 ```
 
 5. Build and start the application:
@@ -56,13 +58,26 @@ GET /health
 | GET | `/customers/:customerId/purchases` | List purchase history |
 | POST | `/purchases/:purchaseId/refunds` | Process a full or partial refund |
 
-Credit adjustments and refunds accept amounts in cents. Example:
+All money-changing POST endpoints require an `Idempotency-Key` header. Use a
+unique key for each logical request and reuse it when retrying that request.
+The same key and request return the original response; reusing a key with a
+different request returns HTTP 409. Concurrent requests using the same key
+wait for the first transaction and then replay its response. Keys are retained
+in the database and are scoped by operation.
+The idempotency record, response, and database changes commit in one
+transaction, so a process failure rolls them back together.
+
+Example:
 
 ```json
 {
   "amountCents": 50000,
   "reason": "Promotional credit"
 }
+```
+
+```http
+Idempotency-Key: 8f43d559-2e85-4fc7-a0b9-331c7210e967
 ```
 
 A purchase request looks like:
@@ -92,6 +107,9 @@ The purchase is saved and credit is reserved before calling the Shipment API.
 
 - On successful shipment creation, the reserved credit is captured and the purchase is marked completed.
 - On shipment failure, the reservation is released and the purchase is marked as failed.
+- The shipment request receives a stable idempotency key. A real shipment
+  provider must honor that key because its side effect cannot participate in
+  the PostgreSQL transaction.
 
 Shipment failures can be simulated by setting `SIMULATE_SHIPMENT_FAILURE=true` in `.env`.
 
@@ -102,6 +120,8 @@ Shipment failures can be simulated by setting `SIMULATE_SHIPMENT_FAILURE=true` i
 - `purchases` – purchase records and shipment status.
 - `purchase_items` – product snapshots at purchase time.
 - `refunds` – refund records.
+- `idempotency_keys` – request hashes and responses used to prevent duplicate
+  money-changing requests.
 
 Database changes are managed through versioned SQL migrations.
 
@@ -110,4 +130,4 @@ Database changes are managed through versioned SQL migrations.
 Run the automated tests: npm test and npm run build
 
 ## Production Improvements
-For production, I would introduce a transactional outbox with background retries, idempotency keys for purchase and refund requests, and reconciliation for shipment failures. We would replace the mocks with actual API clients and add authentication, authorization, and integration tests.
+For production, I would introduce a transactional outbox with background retries and reconciliation for shipment failures. We would replace the mocks with actual API clients and add authentication, authorization, and integration tests.

@@ -3,9 +3,19 @@ import type {
     ShipmentResponse,
 } from '../types/external-apis';
 
+const shipmentsByIdempotencyKey = new Map<string, ShipmentResponse>();
+
 export const createShipment = async (
     request: ShipmentRequest,
+    idempotencyKey?: string,
 ): Promise<ShipmentResponse> => {
+    if (idempotencyKey) {
+        const existingShipment = shipmentsByIdempotencyKey.get(idempotencyKey);
+        if (existingShipment) {
+            return existingShipment;
+        }
+    }
+
     console.log('Creating shipment:', request);
 
     if (request.products.some((product) => product.quantity <= 0)) {
@@ -16,7 +26,11 @@ export const createShipment = async (
         throw new Error('Simulated shipment failure');
     }
 
-    return {
+    const shipment = {
         id: crypto.randomUUID(),
     };
+    if (idempotencyKey) {
+        shipmentsByIdempotencyKey.set(idempotencyKey, shipment);
+    }
+    return shipment;
 };
