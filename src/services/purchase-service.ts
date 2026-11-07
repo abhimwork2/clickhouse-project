@@ -310,13 +310,19 @@ const failPurchase = async (
             [customerId, -amountCents, 'Shipment creation failed', purchaseId],
         );
 
-        await client.query(
+        const purchaseUpdate = await client.query(
             `UPDATE purchases
-       SET status = 'shipment_failed',
-           updated_at = NOW()
-       WHERE id = $1`,
-            [purchaseId],
+     SET status = 'shipment_failed',
+         updated_at = NOW()
+     WHERE id = $1
+       AND customer_id = $2
+       AND status = 'pending_shipment'`,
+            [purchaseId, customerId],
         );
+
+        if (purchaseUpdate.rowCount !== 1) {
+            throw new Error('Purchase is not pending or cannot be marked as failed');
+        }
 
         await client.query('COMMIT');
     } catch (error: unknown) {
