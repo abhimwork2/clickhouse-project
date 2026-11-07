@@ -253,14 +253,20 @@ const completePurchase = async (
             [customerId, -amountCents, 'Purchase completed', purchaseId],
         );
 
-        await client.query(
+        const purchaseUpdate = await client.query(
             `UPDATE purchases
-       SET status = 'completed',
-           shipment_id = $1,
-           updated_at = NOW()
-       WHERE id = $2`,
-            [shipmentId, purchaseId],
+            SET status = 'completed',
+                shipment_id = $1,
+                updated_at = NOW()
+            WHERE id = $2
+            AND customer_id = $3
+            AND status = 'pending_shipment'`,
+            [shipmentId, purchaseId, customerId],
         );
+
+        if (purchaseUpdate.rowCount !== 1) {
+            throw new Error('Purchase is not pending or cannot be completed');
+        }
 
         await client.query('COMMIT');
     } catch (error: unknown) {
