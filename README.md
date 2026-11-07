@@ -4,33 +4,6 @@ An e-commerce billing service built with TypeScript, Fastify, and PostgreSQL.
 
 The service manages customer credit, product purchases, shipment creation, purchase history, and refunds. Customer and product data are retrieved through external APIs, which are mocked for now.
 
-## Tech Stack
-
-- TypeScript / Node.js
-- Fastify
-- PostgreSQL
-- Zod for request validation
-- Vitest for automated tests
-- Docker Compose for the local database
-
-## Project Structure
-
-```text
-src/
-  mocks/        Mock customer, product, and shipment APIs
-  routes/       HTTP endpoints and validation
-  services/     Credit and purchase business logic
-  types/        External API interfaces
-  scripts/      Manual purchase test script
-  config.ts     Environment configuration
-  db.ts         Database connection
-  server.ts     Application entry point
-
-migrations/     SQL database migrations
-tests/          Automated tests
-compose.yaml    PostgreSQL configuration
-```
-
 ## Getting Started
 
 **Prerequisites:** Node.js, npm, and Docker Desktop.
@@ -83,7 +56,7 @@ GET /health
 | GET | `/customers/:customerId/purchases` | List purchase history |
 | POST | `/purchases/:purchaseId/refunds` | Process a full or partial refund |
 
-Credit adjustments and refunds accept amounts in cents. For example:
+Credit adjustments and refunds accept amounts in cents. Example:
 
 ```json
 {
@@ -109,7 +82,6 @@ A purchase request looks like:
 ## Design Decisions
 
 - **Money:** Values are stored as integer cents to avoid floating-point precision issues.
-- **Product snapshots:** Product name, SKU, and price are saved with each purchase. This preserves the original purchase details even if the external product record changes later.
 - **Credit ledger:** Every credit movement is recorded with its amount, reason, reference, and timestamp. The current balance is maintained separately for efficient lookups.
 - **Credit holds:** Credit is reserved when a purchase is created. Available credit is calculated as `balance_cents - held_cents`. This prevents the same credit from being used by multiple pending purchases.
 - **Refunds:** Both partial and full refunds are supported. Existing refunds are checked before another refund is accepted.
@@ -123,9 +95,7 @@ The purchase is saved and credit is reserved before calling the Shipment API.
 
 Shipment failures can be simulated by setting `SIMULATE_SHIPMENT_FAILURE=true` in `.env`.
 
-## Database
-
-The main tables are:
+## Database Tables
 
 - `credit_accounts` – current and held customer credit.
 - `credit_ledger` – history of credit movements.
@@ -137,20 +107,7 @@ Database changes are managed through versioned SQL migrations.
 
 ## Running Tests
 
-Run the automated tests:
-
-```bash
-npm test
-```
-
-Build the application:
-
-```bash
-npm run build
-```
+Run the automated tests: npm test and npm run build
 
 ## Production Improvements
-
-The external APIs are mocked, and the database and Shipment API cannot participate in one atomic transaction.
-
 For production, I would introduce a transactional outbox with background retries, idempotency keys for purchase and refund requests, and reconciliation for shipment failures. We would replace the mocks with actual API clients and add authentication, authorization, and integration tests.
