@@ -5,9 +5,20 @@ const mocks = vi.hoisted(() => ({
     getCreditBalance: vi.fn(),
     grantCredit: vi.fn(),
     deductCredit: vi.fn(),
+    executeIdempotently: vi.fn(async (
+        _operation: string,
+        _key: string,
+        _request: unknown,
+        action: (client: { query: () => Promise<{ rowCount: number; rows: unknown[] }> }) =>
+            Promise<{ statusCode: number; body: unknown }>,
+    ) => action({ query: async () => ({ rowCount: 1, rows: [] }) })),
+    normalizeIdempotencyKey: (header: string | string[] | undefined) =>
+        typeof header === 'string' && header.trim() ? header.trim() : null,
+    IdempotencyConflictError: class extends Error {},
 }));
 
 vi.mock('../src/services/credit-service', () => mocks);
+vi.mock('../src/services/idempotency-service', () => mocks);
 
 import creditRoutes from '../src/routes/credit-routes';
 
@@ -53,6 +64,7 @@ describe('Credit routes', () => {
         const response = await app.inject({
             method: 'POST',
             url: '/customers/11111111-1111-4111-8111-111111111111/credit/grant',
+            headers: { 'idempotency-key': 'grant-1' },
             payload: {
                 amountCents: 50000,
                 reason: 'Test credit grant',
@@ -68,7 +80,7 @@ describe('Credit routes', () => {
             customerId: '11111111-1111-4111-8111-111111111111',
             amountCents: 50000,
             reason: 'Test credit grant',
-        });
+        }, expect.any(Object));
 
         await app.close();
     });
@@ -122,6 +134,7 @@ describe('Credit routes', () => {
         const response = await app.inject({
             method: 'POST',
             url: '/customers/11111111-1111-4111-8111-111111111111/credit/deduct',
+            headers: { 'idempotency-key': 'deduct-1' },
             payload: {
                 amountCents: 500000,
                 reason: 'Test deduction',
@@ -151,6 +164,7 @@ describe('Credit routes', () => {
         const response = await app.inject({
             method: 'POST',
             url: '/customers/11111111-1111-4111-8111-111111111111/credit/deduct',
+            headers: { 'idempotency-key': 'deduct-2' },
             payload: {
                 amountCents: 10000,
                 reason: 'Test deduction',
@@ -167,7 +181,29 @@ describe('Credit routes', () => {
             customerId: '11111111-1111-4111-8111-111111111111',
             amountCents: 10000,
             reason: 'Test deduction',
+        }, expect.any(Object));
+
+        await app.close();
+    });
+
+    it('requires an idempotency key for credit grants', async () => {
+        const app = Fastify();
+        await app.register(creditRoutes);
+
+        const response = await app.inject({
+            method: 'POST',
+            url: '/customers/11111111-1111-4111-8111-111111111111/credit/grant',
+            payload: {
+                amountCents: 50000,
+                reason: 'Test credit grant',
+            },
         });
+
+        expect(response.statusCode).toBe(400);
+        expect(response.json()).toMatchObject({
+            error: 'A valid Idempotency-Key header is required',
+        });
+        expect(mocks.executeIdempotently).not.toHaveBeenCalled();
 
         await app.close();
     });

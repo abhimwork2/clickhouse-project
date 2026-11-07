@@ -1,17 +1,12 @@
+import type { PoolClient } from 'pg';
 import { pool } from '../db';
+import type {
+    CreditAdjustmentRequest,
+    CreditBalanceResponse,
+} from '../types/api';
 
-export interface CreditBalance {
-    customerId: string;
-    balanceCents: number;
-    heldCents: number;
-    availableCents: number;
-}
-
-export interface CreditAdjustment {
-    customerId: string;
-    amountCents: number;
-    reason: string;
-}
+export type CreditBalance = CreditBalanceResponse;
+export type CreditAdjustment = CreditAdjustmentRequest & { customerId: string };
 
 export interface CreditHold {
     customerId: string;
@@ -20,10 +15,36 @@ export interface CreditHold {
     referenceId: string;
 }
 
+const withTransaction = async <T>(
+    existingClient: PoolClient | undefined,
+    action: (client: PoolClient) => Promise<T>,
+): Promise<T> => {
+    if (existingClient) {
+        return action(existingClient);
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const result = await action(client);
+        await client.query('COMMIT');
+        return result;
+    } catch (error: unknown) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+};
+
 export const getCreditBalance = async (
     customerId: string,
+    transactionClient?: PoolClient,
 ): Promise<CreditBalance | null> => {
-    const result = await pool.query<{
+    const query = transactionClient
+        ? transactionClient.query.bind(transactionClient)
+        : pool.query.bind(pool);
+    const result = await query<{
         balance_cents: string;
         held_cents: string;
     }>(
@@ -52,6 +73,7 @@ export const getCreditBalance = async (
 
 export const grantCredit = async (
     adjustment: CreditAdjustment,
+    transactionClient?: PoolClient,
 ): Promise<void> => {
 
     if (
@@ -61,11 +83,7 @@ export const grantCredit = async (
         throw new Error('Grant amount must be a positive integer');
     }
 
-    const client = await pool.connect();
-
-    try {
-        await client.query('BEGIN');
-
+    await withTransaction(transactionClient, async (client) => {
         await client.query(
             `INSERT INTO credit_accounts (customer_id, balance_cents)
        VALUES ($1, $2)
@@ -82,28 +100,18 @@ export const grantCredit = async (
        VALUES ($1, $2, 'grant', $3)`,
             [adjustment.customerId, adjustment.amountCents, adjustment.reason],
         );
-
-        await client.query('COMMIT');
-    } catch (error: unknown) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
-    }
+    });
 };
 
 export const deductCredit = async (
     adjustment: CreditAdjustment,
+    transactionClient?: PoolClient,
 ): Promise<void> => {
     if (!Number.isSafeInteger(adjustment.amountCents) || adjustment.amountCents <= 0) {
         throw new Error('Deduction amount must be a positive integer');
     }
 
-    const client = await pool.connect();
-
-    try {
-        await client.query('BEGIN');
-
+    await withTransaction(transactionClient, async (client) => {
         const result = await client.query(
             `UPDATE credit_accounts
        SET balance_cents = balance_cents - $1,
@@ -123,14 +131,7 @@ export const deductCredit = async (
        VALUES ($1, $2, 'deduction', $3)`,
             [adjustment.customerId, -adjustment.amountCents, adjustment.reason],
         );
-
-        await client.query('COMMIT');
-    } catch (error: unknown) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
-    }
+    });
 };
 
 export const placeCreditHold = async (

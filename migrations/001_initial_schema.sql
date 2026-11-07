@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TABLE credit_accounts (
     customer_id UUID PRIMARY KEY,
     balance_cents BIGINT NOT NULL DEFAULT 0
